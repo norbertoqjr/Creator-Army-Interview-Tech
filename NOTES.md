@@ -4,8 +4,8 @@
 
 All four behaviours from the brief, plus the review rules:
 
-- **Filter the queue** — `listSubmissions` applies the optional status filter, and `home.tsx`'s
-  loader passes the validated search param through (`all` means no filter).
+- **Filter the queue** — `listSubmissions` applies the optional status filter, and the page
+  server component passes the validated `status` search param through (`all` means no filter).
 - **Approve a pending submission** — sets `approved`, stamps `reviewed_at`, writes a
   `review_events` row with `action = 'approved'`.
 - **Request changes with feedback** — sets `changes_requested`, saves the trimmed feedback on
@@ -52,14 +52,18 @@ the race. The extra `SELECT` only runs when nothing was claimed, purely to tell 
 reviewed" apart from "does not exist" for the error message.
 
 **Errors are return values, not exceptions.** `reviewSubmission` returns a
-`ReviewSubmissionResult` so the route action can hand it straight to the existing error
-banner. Unexpected failures (a genuine SQL error) are caught, logged server-side, and
+`ReviewSubmissionResult` so the server action can hand it straight to the error banner. Unexpected failures (a genuine SQL error) are caught, logged server-side, and
 flattened into a generic message — I did not want a driver error reaching the user.
 
-**Validation lives in two places, deliberately.** The zod schema in the route rejects a blank
-textarea with a message aimed at the user. The service re-checks the trimmed feedback because
-it is the thing that guarantees the invariant, and it is called directly by tests. The route
-schema is UX; the service check is the actual rule.
+**Validation lives in two places, deliberately.** The zod schema in the server action rejects a
+blank textarea with a message aimed at the user. The service re-checks the trimmed feedback
+because it is the thing that guarantees the invariant, and it is called directly by tests. The
+action schema is UX; the service check is the actual rule.
+
+**The framework boundary is thin on purpose.** Every rule lives in
+`app/services/submission-service.ts`, which imports nothing from Next. That is why the whole
+test suite is framework-agnostic, and it is what made porting this from the starter's React
+Router shell to Next.js a change to the page and the config only.
 
 **Feedback is trimmed once, in the service,** so what is stored on the submission and what is
 stored on the event are always the same string.
@@ -80,12 +84,13 @@ changes, the three error cases, and a reload confirming the decisions and the ne
 
 ## What I would improve with more time
 
-- **A route-level test.** The loader and action are only covered by my manual pass. I would
-  add tests that drive them through the React Router request/response cycle so the zod schema
-  and the wiring are covered automatically.
-- **Progressive enhancement.** A plain form post to `/` without JavaScript hits the root route
-  and 405s; React Router's client `<Form>` appends `?index` for you. Setting an explicit
-  `action="/?index"` on both forms would make the page work with JS disabled.
+- **A test around the server action.** `submitReview` and the page component are only covered
+  by my manual pass. I would add tests that call the action with a `FormData` so the zod schema
+  and the error mapping are covered automatically.
+- **Progressive enhancement.** The review forms post through a server action, so they need
+  JavaScript. Next.js can run server actions from a plain form post, but the success and error
+  banners are held in `useActionState`; moving that state into the URL or a cookie would make
+  the page work with JS disabled.
 - **Show the review history.** `review_events` is written but never read. The audit trail is
   the interesting part of a review desk, and the data is already there.
 - **Optimistic UI.** `useNavigation` already disables the buttons while saving; the row could
@@ -97,12 +102,11 @@ changes, the three error cases, and a reload confirming the decisions and the ne
 
 ## Assumptions
 
-- **I kept the starter's stack.** The brief says "Build the solution with Next.js and
-  TypeScript", but the repository is a React Router 7 framework-mode app, and the brief also
-  says the UI, database, schemas, and tests are already provided. Rewriting it as Next.js
-  would have meant discarding all of that, so I read the requirement as "TypeScript, in the
-  framework the starter uses" and completed the project in place. Happy to port it if the
-  Next.js requirement was meant literally.
+- **The starter shipped as React Router 7; the brief asks for Next.js.** I took the brief as
+  binding and ported it to Next.js 16 (App Router, server components, a server action), which
+  is what this repository now runs. The database, schema, seed, validation, service, and all
+  15 tests carried over untouched — only the page, the routing, and the build config were
+  framework-specific. The starter's UI, copy, and behaviour are preserved.
 - Reviews are final — the brief says only a `pending` submission can be reviewed, so I treated
   a decision as one-way. There is no un-approve or re-review.
 - A single campaign manager, no auth (explicitly out of scope), so review events record no actor.
