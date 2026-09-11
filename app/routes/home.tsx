@@ -47,8 +47,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const parsedFilter = z.enum(queueFilters).safeParse(requestedFilter);
   const status: QueueFilter = parsedFilter.success ? parsedFilter.data : "all";
 
-  // TODO(candidate): pass the selected filter to the service.
-  const queue = listSubmissions({});
+  const queue = listSubmissions(
+    status === "all" ? {} : { status },
+  );
 
   return {
     queue,
