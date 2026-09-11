@@ -15,9 +15,29 @@ type QueueFilter = (typeof queueFilters)[number];
 
 const filterLabels: Record<QueueFilter, string> = {
   all: "All submissions",
-  pending: "Awaiting review",
+  pending: "Pending",
   approved: "Approved",
   changes_requested: "Changes requested",
+};
+
+/** Each empty state names the specific situation, not a generic "nothing here". */
+const emptyStates: Record<QueueFilter, { title: string; body: string }> = {
+  all: {
+    title: "No submissions yet",
+    body: "Creator content appears here as soon as it is submitted to a campaign.",
+  },
+  pending: {
+    title: "Nothing left to review",
+    body: "Every submission has a decision. New content will land here when creators submit.",
+  },
+  approved: {
+    title: "No approved submissions yet",
+    body: "Content you approve will be listed here.",
+  },
+  changes_requested: {
+    title: "No change requests",
+    body: "Submissions you send back with feedback will be listed here.",
+  },
 };
 
 const reviewSchema = z.discriminatedUnion("intent", [
@@ -68,13 +88,90 @@ export async function action({ request }: Route.ActionArgs) {
     };
   }
 
-  return reviewSubmission(parsed.data);
+  const result = reviewSubmission(parsed.data);
+
+  if (!result.ok) {
+    return { ok: false as const, error: result.error };
+  }
+
+  return {
+    ok: true as const,
+    message:
+      parsed.data.intent === "approve"
+        ? "Submission approved."
+        : "Changes requested. Your feedback is saved for the creator.",
+  };
 }
 
 function formatStatus(status: (typeof submissionStatuses)[number]): string {
   return status === "changes_requested"
     ? "Changes requested"
     : status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+type IconProps = { size?: number };
+
+function Icon({ size = 16, children }: IconProps & { children: React.ReactNode }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <Icon>
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M5.4 8.2 7.2 10l3.4-3.6" />
+    </Icon>
+  );
+}
+
+function WarningIcon() {
+  return (
+    <Icon>
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M8 5v3.4" />
+      <path d="M8 10.9h.01" />
+    </Icon>
+  );
+}
+
+function ExternalLinkIcon() {
+  return (
+    <Icon size={14}>
+      <path d="M9.5 3h3.5v3.5" />
+      <path d="M12.6 3.4 7.4 8.6" />
+      <path d="M11.5 9.8v2.4a1 1 0 0 1-1 1H3.8a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h2.4" />
+    </Icon>
+  );
+}
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Formatted in UTC on purpose: a locale-dependent string would not survive hydration. */
+function formatReviewedAt(value: string | null): string | null {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 function initials(name: string): string {
@@ -108,14 +205,15 @@ export default function ReviewDesk({
       <div className="workspace">
         <aside className="queue-sidebar">
           <div>
-            <p className="sidebar-kicker">Today’s queue</p>
             <h1>Review desk</h1>
             <p className="sidebar-copy">
-              Keep campaigns moving by giving creators a clear decision.
+              Approve creator content, or send it back with feedback on what to
+              change.
             </p>
           </div>
 
-          <nav className="queue-navigation" aria-label="Submission status">
+          <nav className="queue-navigation" aria-label="Filter by status">
+            <p className="nav-heading">Status</p>
             {queueFilters.map((filter) => (
               <Link
                 key={filter}
@@ -127,34 +225,40 @@ export default function ReviewDesk({
               </Link>
             ))}
           </nav>
-
-          <div className="timebox-note">
-            <span>Challenge timebox</span>
-            <strong>2 hours maximum</strong>
-          </div>
         </aside>
 
         <section className="queue-content" aria-labelledby="queue-heading">
           <div className="queue-heading-row">
-            <div>
-              <p className="queue-context">Content review</p>
-              <h2 id="queue-heading">{filterLabels[status]}</h2>
-            </div>
+            <h2 id="queue-heading">{filterLabels[status]}</h2>
             <span className="result-count">
               {queue.length} {queue.length === 1 ? "submission" : "submissions"}
             </span>
           </div>
 
           {actionData && !actionData.ok ? (
-            <div className="error-banner" role="alert">
-              <strong>Review not saved.</strong> {actionData.error}
+            <div className="banner banner-error" role="alert">
+              <span className="banner-icon" aria-hidden="true">
+                <WarningIcon />
+              </span>
+              <span>
+                <strong>Review not saved.</strong> {actionData.error}
+              </span>
+            </div>
+          ) : null}
+
+          {actionData?.ok ? (
+            <div className="banner banner-success" role="status">
+              <span className="banner-icon" aria-hidden="true">
+                <CheckIcon />
+              </span>
+              <span>{actionData.message}</span>
             </div>
           ) : null}
 
           {queue.length === 0 ? (
             <div className="empty-state">
-              <h3>Nothing waiting here</h3>
-              <p>Choose another status to see the rest of the review queue.</p>
+              <h3>{emptyStates[status].title}</h3>
+              <p>{emptyStates[status].body}</p>
             </div>
           ) : (
             <div className="submission-list">
@@ -162,6 +266,7 @@ export default function ReviewDesk({
                 const isSubmitting =
                   navigation.state === "submitting" &&
                   activeSubmissionId === String(submission.id);
+                const reviewedOn = formatReviewedAt(submission.reviewedAt);
 
                 return (
                   <article className="submission" key={submission.id}>
@@ -186,11 +291,26 @@ export default function ReviewDesk({
                         rel="noreferrer"
                       >
                         View submitted content
-                        <span aria-hidden="true">↗</span>
+                        <ExternalLinkIcon />
+                        <span className="visually-hidden">(opens in a new tab)</span>
                       </a>
 
                       {submission.reviewerFeedback ? (
-                        <blockquote>{submission.reviewerFeedback}</blockquote>
+                        <div className="feedback-note">
+                          <span className="feedback-note-label">
+                            Feedback sent to {submission.creatorName}
+                          </span>
+                          <p>{submission.reviewerFeedback}</p>
+                        </div>
+                      ) : null}
+
+                      {reviewedOn ? (
+                        <p className="reviewed-note">
+                          {submission.status === "approved"
+                            ? "Approved"
+                            : "Changes requested"}{" "}
+                          on {reviewedOn}
+                        </p>
                       ) : null}
 
                       {submission.status === "pending" ? (
@@ -207,7 +327,7 @@ export default function ReviewDesk({
                               type="submit"
                               disabled={isSubmitting}
                             >
-                              {isSubmitting ? "Saving…" : "Approve"}
+                              {isSubmitting ? "Saving…" : "Approve submission"}
                             </button>
                           </Form>
 
@@ -223,14 +343,22 @@ export default function ReviewDesk({
                               value="request-changes"
                             />
                             <label htmlFor={`feedback-${submission.id}`}>
-                              Feedback for the creator
+                              Feedback for {submission.creatorName}
                             </label>
+                            <p
+                              className="feedback-hint"
+                              id={`feedback-hint-${submission.id}`}
+                            >
+                              Required to request changes. Name what to change
+                              and why.
+                            </p>
                             <div className="feedback-row">
                               <textarea
                                 id={`feedback-${submission.id}`}
                                 name="feedback"
                                 rows={2}
-                                placeholder="Be specific about what needs to change"
+                                aria-describedby={`feedback-hint-${submission.id}`}
+                                placeholder="e.g. Show the product in the opening five seconds."
                               />
                               <button
                                 className="changes-button"
