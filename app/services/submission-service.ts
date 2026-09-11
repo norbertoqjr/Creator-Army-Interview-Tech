@@ -1,7 +1,11 @@
-import { count, desc } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 
 import { db } from "~/db";
-import { submissions, type SubmissionStatus } from "~/db/schema";
+import {
+  reviewEvents,
+  submissions,
+  type SubmissionStatus,
+} from "~/db/schema";
 
 export type ReviewSubmissionInput =
   | { submissionId: number; intent: "approve" }
@@ -15,11 +19,19 @@ export type ReviewSubmissionResult =
   | { ok: true }
   | { ok: false; error: string };
 
-export function listSubmissions({ status }: { status?: SubmissionStatus }) {
-  // TODO(candidate): apply the optional status filter.
-  void status;
+/** Maps the form intent onto the status and review_events action it produces. */
+const reviewOutcomes = {
+  approve: "approved",
+  "request-changes": "changes_requested",
+} as const satisfies Record<ReviewSubmissionInput["intent"], SubmissionStatus>;
 
-  return db.select().from(submissions).orderBy(desc(submissions.createdAt)).all();
+export function listSubmissions({ status }: { status?: SubmissionStatus }) {
+  return db
+    .select()
+    .from(submissions)
+    .where(status ? eq(submissions.status, status) : undefined)
+    .orderBy(desc(submissions.createdAt))
+    .all();
 }
 
 export function getSubmissionCounts(): Record<"all" | SubmissionStatus, number> {
@@ -47,13 +59,73 @@ export function getSubmissionCounts(): Record<"all" | SubmissionStatus, number> 
 export function reviewSubmission(
   input: ReviewSubmissionInput,
 ): ReviewSubmissionResult {
-  // TODO(candidate): enforce the business rules, update the submission, and
-  // append a review event in one transaction.
-  void input;
+  const feedback =
+    input.intent === "request-changes" ? input.feedback.trim() : null;
 
-  return {
-    ok: false,
-    error: "Reviewing submissions has not been implemented yet.",
-  };
+  if (input.intent === "request-changes" && !feedback) {
+    return {
+      ok: false,
+      error: "Tell the creator what to change before requesting changes.",
+    };
+  }
+
+  const nextStatus = reviewOutcomes[input.intent];
+  const reviewedAt = new Date().toISOString();
+
+  try {
+    return db.transaction((tx): ReviewSubmissionResult => {
+      // Claim the row by status as well as id, so a submission reviewed by
+      // someone else in the meantime cannot be reviewed twice.
+      const claimed = tx
+        .update(submissions)
+        .set({
+          status: nextStatus,
+          reviewerFeedback: feedback,
+          reviewedAt,
+        })
+        .where(
+          and(
+            eq(submissions.id, input.submissionId),
+            eq(submissions.status, "pending"),
+          ),
+        )
+        .returning({ id: submissions.id })
+        .all();
+
+      if (claimed.length === 0) {
+        // Nothing was written, so distinguish "missing" from "already reviewed"
+        // only to produce a useful message.
+        const existing = tx
+          .select({ status: submissions.status })
+          .from(submissions)
+          .where(eq(submissions.id, input.submissionId))
+          .get();
+
+        return {
+          ok: false,
+          error: existing
+            ? "This submission has already been reviewed."
+            : "That submission no longer exists.",
+        };
+      }
+
+      tx.insert(reviewEvents)
+        .values({
+          submissionId: input.submissionId,
+          action: nextStatus,
+          feedback,
+          createdAt: reviewedAt,
+        })
+        .run();
+
+      return { ok: true };
+    });
+  } catch (error) {
+    console.error("Failed to review submission", error);
+
+    return {
+      ok: false,
+      error: "We could not save that review. Please try again.",
+    };
+  }
 }
-
