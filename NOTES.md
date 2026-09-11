@@ -22,6 +22,26 @@ Rules enforced in `reviewSubmission`:
 - A failed review returns `{ ok: false, error }` with a message the UI already renders, and
   leaves the data untouched.
 
+## Interface and copy
+
+The brief allows visual changes where they make success, failure, or status clear, and two
+of those were genuinely unclear, so I kept the existing identity and retuned the surface as
+a tool rather than a marketing page.
+
+- **Approving gave no confirmation.** The action now returns a message and the page renders a
+  success banner, so a saved decision is visible rather than inferred from the list redrawing.
+- **The same status had two names.** The sidebar said "Awaiting review" while every badge said
+  "Pending", so the word "pending" appeared nowhere in the navigation. One name per concept now.
+- **Type was sized for a billboard.** The heading was `clamp(42px, 5vw, 70px)` at `-0.065em`
+  tracking inside a 7ch column, while the content it framed ran at 11-13px. Both now sit on one
+  fixed rem scale stepping 1.15x from a 15px base.
+- **Contrast.** All 17 shipped text/background pairs clear 4.5:1. The textarea placeholder was
+  2.9:1 before.
+- **Decided submissions now show when the decision was made** and who the stored feedback went
+  to, and each filter has its own empty state instead of one generic line.
+- I removed the "Challenge timebox - 2 hours maximum" card, which was interview scaffolding
+  rendered as product UI.
+
 ## Important decisions and trade-offs
 
 **The status guard is the write itself, not a read-then-write.** Instead of `SELECT` →
@@ -56,7 +76,7 @@ That last one is the only test that proves the transaction requirement rather th
 
 I also exercised the running app end to end: filtering by each status, approving, requesting
 changes, the three error cases, and a reload confirming the decisions and the new
-`review_events` rows persisted.
+`review_events` rows persisted. The interface was checked at 1440px and 390px.
 
 ## What I would improve with more time
 
