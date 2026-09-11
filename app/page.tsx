@@ -53,7 +53,7 @@ export default async function ReviewDeskPage({
           </div>
 
           <nav className="queue-navigation" aria-label="Filter by status">
-            <p className="nav-heading">Status</p>
+            <p className="nav-heading">Filter</p>
             {queueFilters.map((filter) => (
               <Link
                 key={filter}
